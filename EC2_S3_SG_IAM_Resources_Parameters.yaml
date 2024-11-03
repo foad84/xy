@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to create an EC2 instance with an IAM role, an S3 bucket, and a security group.
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: The name of the S3 bucket (must be globally unique).
+  
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3a.micro
+    Description: EC2 instance type (free tier eligible).
+  
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: The name of an existing EC2 KeyPair to enable SSH access to the instance.
+
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC ID where the resources will be created.
+
+Resources:
+  # Create an S3 bucket
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName  # Using parameter for bucket name
+
+  # Create an IAM Role
+  MyIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MyS3AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${MyS3Bucket}'  # Allow access to the bucket
+                  - !Sub 'arn:aws:s3:::${MyS3Bucket}/*'  # Allow access to objects in the bucket
+
+  # Create an IAM Instance Profile to associate the role with the EC2 instance
+  MyIAMInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref MyIAMRole
+
+  # Create a Security Group
+  MySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP and SSH access
+      VpcId: !Ref VPCId  # Use parameter for VPC ID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0  # Allow HTTP access from anywhere
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0  # Allow SSH access from anywhere (consider restricting this)
+
+  # Create an EC2 Instance
+  MyEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType  # Using parameter for instance type
+      ImageId: ami-0cf4e1fcfd8494d5b  # Replace with a valid Amazon Linux AMI ID for your region
+      IamInstanceProfile: !Ref MyIAMInstanceProfile  # Associate the IAM role
+      KeyName: !Ref KeyName  # Use provided KeyName parameter
+      SecurityGroupIds:
+        - !Ref MySecurityGroup  # Associate the security group with the instance
+      UserData: 
+        Fn::Base64: 
+          !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install -y httpd
+            systemctl start httpd
+            systemctl enable httpd
+
+Outputs:
+  S3BucketName:
+    Description: "The name of the S3 bucket created."
+    Value: !Ref MyS3Bucket
+  
+  EC2InstancePublicIP:
+    Description: "Public IP address of the EC2 instance."
+    Value: !GetAtt MyEC2Instance.PublicIp
+  
+  EC2InstanceID:
+    Description: "Instance ID of the EC2 instance."
+    Value: !Ref MyEC2Instance
+
+  IAMRoleArn:
+    Description: "ARN of the IAM Role."
+    Value: !GetAtt MyIAMRole.Arn
+  
+  SecurityGroupID:
+    Description: "ID of the security group created."
+    Value: !Ref MySecurityGroup
+  
